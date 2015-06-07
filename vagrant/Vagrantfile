@@ -1,0 +1,64 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# set them as you like
+PRIVATE_IP = "192.168.33.10"
+MYSQL_ROOT_PASS = "root"
+WP_DB_NAME = "wp"
+WP_USER_NAME = "admin"
+WP_USER_PASS = "admin"
+
+Vagrant.configure(2) do |config|
+  config.vm.box = "ubuntu/trusty64"
+
+  # config.vm.network "public_network"
+  config.vm.network "private_network", ip: PRIVATE_IP
+  # config.vm.network "forwarded_port", guest: 80, host: 8080
+
+  config.vm.synced_folder "../wordpress", "/var/www/html/"
+
+  config.vm.provision "shell", inline: <<-SHELL
+    export PATH=/usr/local/bin:$PATH
+    export DEBIAN_FRONTEND=noninteractive
+
+    debconf-set-selections <<< 'mysql-server mysql-server/root_password password #{MYSQL_ROOT_PASS}'
+    debconf-set-selections <<< 'mysql-server mysql-server/root_password_again password #{MYSQL_ROOT_PASS}'
+
+    sudo echo "Asia/Tokyo" > /etc/timezone
+    sudo cp /usr/share/zoneinfo/Japan /etc/localtime
+    sudo dpkg-reconfigure --frontend noninteractive tzdata
+
+    # install server and etc...
+    sudo aptitude update
+    sudo aptitude install -y apache2 php5 php5-mysql
+    sudo aptitude install -y mysql-server
+    sudo a2enmod php5
+    sudo a2enmod rewrite
+
+    # php config
+    sudo sed -i 's/;date\.timezone =/date.timezone = Asia\/Tokyo/' /etc/php5/apache2/php.ini
+
+    # install wp-cli
+    curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+    chmod +x wp-cli.phar
+    sudo mv wp-cli.phar /usr/local/bin/wp
+
+    # setup wordpress
+    echo "DROP DATABASE IF EXISTS #{WP_DB_NAME}" | mysql -uroot -p#{MYSQL_ROOT_PASS}
+    echo "CREATE DATABASE #{WP_DB_NAME}" | mysql -uroot -p#{MYSQL_ROOT_PASS}
+
+    cd /var/www/html/
+    sudo rm -rf *
+    sudo -uvagrant wp core download --locale=ja
+    sudo -uvagrant wp core config --dbname=#{WP_DB_NAME} --dbuser=root --dbpass=#{MYSQL_ROOT_PASS} --dbhost=localhost
+    sudo -uvagrant wp core install --url=http://#{PRIVATE_IP} --title=EXAMPLE --admin_user=#{WP_USER_NAME} --admin_password=#{WP_USER_PASS} --admin_email=admin@example.com
+
+    # setup wordpress plugins
+    sudo -uvagrant wp plugin uninstall hello
+    cd -
+
+    # restart services
+    sudo service apache2 restart
+    sudo service mysql restart
+  SHELL
+end
